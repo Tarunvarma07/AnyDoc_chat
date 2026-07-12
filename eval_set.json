@@ -1,0 +1,18 @@
+[
+    {
+        "query": "What is Reciprocal Rank Fusion?",
+        "expected_substring": "Reciprocal Rank Fusion (RRF) is an algorithm"
+    },
+    {
+        "query": "What does Error Code XJ-992 mean during a crash?",
+        "expected_substring": "Error Code XJ-992 specifically indicates a database timeout"
+    },
+    {
+        "query": "Did the v1.4.2 software update fix the routing engine latency?",
+        "expected_substring": "The routing engine upgrade in v1.4.2 fixed the latency bug"
+    },
+    {
+        "query": "Why was transaction TXN-8819 declined?",
+        "expected_substring": "Transaction TXN-8819 was declined due to insufficient funds"
+    }
+]
