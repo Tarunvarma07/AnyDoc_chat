@@ -1,0 +1,19 @@
+langchain
+langchain-community
+langchain-groq
+python-dotenv
+pytest
+requests
+beautifulsoup4
+pypdf
+docx2txt
+python-magic-bin; sys_platform == 'win32'
+python-magic; sys_platform != 'win32'
+chromadb
+sentence-transformers
+rank_bm25
+langchain-huggingface
+fastapi
+uvicorn
+streamlit
+python-multipart
