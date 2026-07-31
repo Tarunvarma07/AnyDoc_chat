@@ -14,5 +14,21 @@
     {
         "query": "Why was transaction TXN-8819 declined?",
         "expected_substring": "Transaction TXN-8819 was declined due to insufficient funds"
+    },
+    {
+        "query": "How was order ORD-45213 shipped?",
+        "expected_substring": "Order #ORD-45213 was shipped via express courier on the same day"
+    },
+    {
+        "query": "What is the API's rate limit per key?",
+        "expected_substring": "The API enforces a rate limit of 120 requests per minute per API key"
+    },
+    {
+        "query": "What happened to support ticket SUP-77021?",
+        "expected_substring": "Support ticket #SUP-77021 was escalated to Tier 2 after 48 hours"
+    },
+    {
+        "query": "What is the default connection timeout in config.yaml?",
+        "expected_substring": "The default connection timeout is set to 30 seconds in config.yaml"
     }
 ]
