@@ -1,6 +1,7 @@
 import re
 import logging
 from typing import List
+from better_profanity import profanity
 from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
@@ -17,10 +18,9 @@ INJECTION_PATTERNS = [
     r"jailbreak"
 ]
 
-# Basic V1 Profanity Blocklist
-PROFANITY_LIST = [
-    "badword1", "badword2", "profanity1" # Placeholder for actual profanity list
-]
+# Loads better_profanity's maintained, whole-word-matched default wordlist
+# once at import time instead of hand-rolling and maintaining our own list.
+profanity.load_censor_words()
 
 def check_prompt_injection(text: str) -> bool:
     """
@@ -40,18 +40,17 @@ def check_prompt_injection(text: str) -> bool:
 
 def check_profanity(text: str) -> bool:
     """
-    Scans text for profanity.
+    Scans text for profanity using better_profanity's maintained wordlist
+    (whole-word matched, so it doesn't flag substrings like "assessment").
     Returns True if profanity is detected, False otherwise.
     """
     if not text:
         return False
-        
-    text_lower = text.lower()
-    for word in PROFANITY_LIST:
-        if word in text_lower:
-            logger.warning(f"Guardrail triggered: Profanity detected")
-            return True
-            
+
+    if profanity.contains_profanity(text):
+        logger.warning("Guardrail triggered: Profanity detected")
+        return True
+
     return False
 
 def verify_citations(answer: str, context_docs: List[Document]) -> bool:
