@@ -15,6 +15,8 @@ from src.ingestion.metadata_extractor import MetadataExtractor
 from src.pipeline.chunk import Chunker
 from src.pipeline.embed_store import EmbedStore
 from src.retrieval.hybrid_search import HybridRetriever
+from src.retrieval.reranker import Reranker
+from src.retrieval.query_rewriter import QueryRewriter
 from src.generation.qa_chain import QAGenerator
 
 app = FastAPI(title="Universal Q&A Pipeline API")
@@ -22,12 +24,28 @@ app = FastAPI(title="Universal Q&A Pipeline API")
 DB_DIR = "./chroma_db"
 os.makedirs(DB_DIR, exist_ok=True)
 
-# Fail fast on startup if components cannot be initialized (e.g., missing API keys)
+# Fail fast on startup if components cannot be initialized (e.g., missing API keys).
+# The reranker model is loaded lazily on first query, so instantiating it here
+# doesn't slow down startup or require network access at boot.
 embed_store = EmbedStore(persist_directory=DB_DIR)
-retriever = HybridRetriever(embed_store=embed_store)
+reranker = Reranker()
+retriever = HybridRetriever(embed_store=embed_store, reranker=reranker)
+query_rewriter = QueryRewriter()
 qa_generator = QAGenerator()
 metadata_extractor = MetadataExtractor()
 chunker = Chunker(strategy="recursive")
+
+@app.get("/stats")
+def get_stats():
+    """Live corpus/pipeline stats for the dashboard's Overview tab."""
+    return {
+        "document_count": embed_store.vector_store._collection.count(),
+        "embedding_model": embed_store.model_name,
+        "reranker_model": reranker.model_name,
+        "reranker_enabled": True,
+        "hybrid_k": retriever.k,
+        "top_n": retriever.top_n,
+    }
 
 class QueryRequest(BaseModel):
     query: str
@@ -88,28 +106,37 @@ async def ingest_file(file: UploadFile = File(...)):
 @app.post("/query")
 def query_documents(req: QueryRequest):
     import time
-    
+
     t0 = time.time()
-    retrieved_docs = retriever.get_relevant_documents(req.query)
+    search_query = query_rewriter.rewrite(req.query)
     t1 = time.time()
-    answer = qa_generator.generate_answer(req.query, retrieved_docs)
+    # Retrieval uses the rewritten (keyword-enriched) query; generation and
+    # citation/guardrail checks stay anchored to the user's original question.
+    retrieved_docs = retriever.get_relevant_documents(search_query)
     t2 = time.time()
-    
-    retrieval_ms = round((t1 - t0) * 1000, 2)
-    gen_ms = round((t2 - t1) * 1000, 2)
-    
+    answer = qa_generator.generate_answer(req.query, retrieved_docs)
+    t3 = time.time()
+
+    rewrite_ms = round((t1 - t0) * 1000, 2)
+    retrieval_ms = round((t2 - t1) * 1000, 2)
+    gen_ms = round((t3 - t2) * 1000, 2)
+
     sources = []
     for i, doc in enumerate(retrieved_docs, start=1):
         sources.append({
             "id": i,
             "source": doc.metadata.get("source", "Unknown"),
-            "content": doc.page_content[:200] + "..."
+            "content": doc.page_content[:200] + "...",
+            "rerank_score": doc.metadata.get("rerank_score")
         })
-        
+
     return {
         "answer": answer,
         "sources": sources,
+        "search_query": search_query,
+        "pipeline": retriever.last_run_stats,
         "timings": {
+            "rewrite_ms": rewrite_ms,
             "retrieval_ms": retrieval_ms,
             "gen_ms": gen_ms
         }
