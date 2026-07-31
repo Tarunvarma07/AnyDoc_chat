@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install libmagic (required by python-magic for file validation)
+        run: sudo apt-get update && sudo apt-get install -y libmagic1
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run test suite
+        env:
+          PYTHONPATH: .
+          # No real Groq key is needed: every test that touches an LLM mocks
+          # ChatGroq, but ChatGroq's constructor still checks for *a* key.
+          GROQ_API_KEY: dummy-ci-key
+        run: pytest -v
