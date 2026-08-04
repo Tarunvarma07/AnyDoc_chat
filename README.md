@@ -4,6 +4,8 @@ This document outlines the complete architectural journey of building a producti
 
 A short technical report (architecture, evaluation methodology/results, related work) is available at [`docs/AnyDoc_Technical_Report.pdf`](docs/AnyDoc_Technical_Report.pdf).
 
+Want a live deployment instead of running locally? See [`DEPLOY.md`](DEPLOY.md) for a Render Blueprint that deploys both services from the existing Dockerfile.
+
 ## 🏗️ Phase 1 & 2: Base Infrastructure & Chunking
 
 I began by establishing a robust document ingestion pipeline capable of parsing PDFs, TXT, CSV, and DOCX files. 

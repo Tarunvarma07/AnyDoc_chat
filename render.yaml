@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: anydoc-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /stats
+    dockerCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  - type: web
+    name: anydoc-ui
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    dockerCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      # Update this if Render assigns anydoc-api a different subdomain
+      # (e.g. because "anydoc-api" was already taken) - see DEPLOY.md.
+      - key: API_URL
+        value: https://anydoc-api.onrender.com
