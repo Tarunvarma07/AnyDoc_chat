@@ -292,6 +292,21 @@ def fetch_stats():
     return None, False
 
 
+def error_detail(res):
+    """
+    Extracts a human-readable error message from a non-200 response.
+    FastAPI returns {"detail": "..."} on handled errors, but Render's own
+    proxy can return a plain-text/HTML error page (e.g. on a gateway
+    timeout) that isn't JSON at all - res.json() would raise and crash the
+    whole app if called blindly, so this always degrades to something safe.
+    """
+    try:
+        return res.json().get("detail", f"Request failed ({res.status_code}).")
+    except (ValueError, requests.exceptions.JSONDecodeError):
+        snippet = res.text[:200].strip() if res.text else "(empty response)"
+        return f"Request failed ({res.status_code}): {snippet}"
+
+
 def render_metric_card(label, value, sub=""):
     st.markdown(f"""
     <div class="metric-card">
@@ -390,13 +405,13 @@ with tab_ingest:
             else:
                 with st.spinner("Processing link..."):
                     try:
-                        res = requests.post(f"{API_URL}/ingest/url", json={"url": url_input})
+                        res = requests.post(f"{API_URL}/ingest/url", json={"url": url_input}, timeout=120)
                         if res.status_code == 200:
                             render_status(True, res.json()["message"])
                         else:
-                            render_status(False, res.json()["detail"])
-                    except requests.exceptions.ConnectionError:
-                        render_status(False, "Backend API is offline.")
+                            render_status(False, error_detail(res))
+                    except requests.exceptions.RequestException as e:
+                        render_status(False, f"Backend API is offline or timed out: {e}")
 
     with col_file:
         st.markdown(f"<div style='display:flex; align-items:center; gap:8px; margin-bottom:8px; font-weight:600;'>{ICON_FILE} Upload a file</div>", unsafe_allow_html=True)
@@ -408,13 +423,13 @@ with tab_ingest:
                 with st.spinner("Processing file..."):
                     try:
                         files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                        res = requests.post(f"{API_URL}/ingest/file", files=files)
+                        res = requests.post(f"{API_URL}/ingest/file", files=files, timeout=170)
                         if res.status_code == 200:
                             render_status(True, res.json()["message"])
                         else:
-                            render_status(False, res.json()["detail"])
-                    except requests.exceptions.ConnectionError:
-                        render_status(False, "Backend API is offline.")
+                            render_status(False, error_detail(res))
+                    except requests.exceptions.RequestException as e:
+                        render_status(False, f"Backend API is offline or timed out: {e}")
 
     st.markdown("<hr style='border:none; border-top:1px solid var(--border); margin: 24px 0;'>", unsafe_allow_html=True)
     stats, backend_up = fetch_stats()
@@ -485,7 +500,7 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("Rewriting query, retrieving, reranking, generating..."):
                 try:
-                    res = requests.post(f"{API_URL}/query", json={"query": query})
+                    res = requests.post(f"{API_URL}/query", json={"query": query}, timeout=170)
                     if res.status_code == 200:
                         data = res.json()
                         content = data["answer"]
@@ -524,9 +539,9 @@ with tab_chat:
                             "query": query
                         })
                     else:
-                        render_status(False, res.json()["detail"])
-                except requests.exceptions.ConnectionError:
-                    render_status(False, "Backend API is offline.")
+                        render_status(False, error_detail(res))
+                except requests.exceptions.RequestException as e:
+                    render_status(False, f"Backend API is offline or timed out: {e}")
 
 # --- TAB: CHUNKING LAB ---
 with tab_chunking:
