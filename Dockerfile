@@ -21,6 +21,12 @@ COPY . .
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+# Torch/BLAS default to spinning up one thread pool per CPU core, each with
+# its own memory buffers - wasteful on a constrained single-core instance
+# and a real contributor to OOM on 512MB hosts. Force single-threaded.
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV TOKENIZERS_PARALLELISM=false
 
 EXPOSE 8000
 
