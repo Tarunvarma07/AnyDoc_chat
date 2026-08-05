@@ -12,7 +12,7 @@ def test_reranker_reorders_by_cross_encoder_score():
 
     mock_model = MagicMock()
     # Cross-encoders score more relevant pairs higher; make docs[1] win.
-    mock_model.predict.return_value = [0.1, 0.9, 0.4]
+    mock_model.rerank.return_value = [0.1, 0.9, 0.4]
 
     reranker = Reranker()
     with patch.object(reranker, "_get_model", return_value=mock_model):
@@ -38,7 +38,7 @@ def test_hybrid_retriever_uses_reranker_when_provided(tmp_path):
     from src.retrieval.hybrid_search import HybridRetriever
 
     db_path = str(tmp_path / "chroma_db_rerank")
-    store = EmbedStore(persist_directory=db_path, model_name="all-MiniLM-L6-v2", collection_name="test_rerank")
+    store = EmbedStore(persist_directory=db_path, model_name="sentence-transformers/all-MiniLM-L6-v2", collection_name="test_rerank")
 
     docs = [
         Document(page_content="Python is a programming language.", metadata={"chunk_index": 1}),
@@ -61,7 +61,7 @@ def test_hybrid_retriever_widens_candidate_pool_when_reranker_attached(tmp_path)
     from src.retrieval.hybrid_search import HybridRetriever
 
     db_path = str(tmp_path / "chroma_db_rerank_candidates")
-    store = EmbedStore(persist_directory=db_path, model_name="all-MiniLM-L6-v2", collection_name="test_rerank_candidates")
+    store = EmbedStore(persist_directory=db_path, model_name="sentence-transformers/all-MiniLM-L6-v2", collection_name="test_rerank_candidates")
 
     mock_reranker = MagicMock()
     retriever = HybridRetriever(embed_store=store, top_n=5, reranker=mock_reranker)

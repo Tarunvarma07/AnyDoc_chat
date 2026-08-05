@@ -2,19 +2,22 @@ import os
 import logging
 from typing import List
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_community.vectorstores import Chroma
 
 logger = logging.getLogger(__name__)
 
 class EmbedStore:
-    def __init__(self, persist_directory: str = "./chroma_db", model_name: str = "all-MiniLM-L6-v2", collection_name: str = "qa_chatbot"):
+    def __init__(self, persist_directory: str = "./chroma_db", model_name: str = "sentence-transformers/all-MiniLM-L6-v2", collection_name: str = "qa_chatbot"):
         self.persist_directory = persist_directory
         self.model_name = model_name
         self.collection_name = collection_name
-        
-        # Initialize embeddings (runs locally)
-        self.embeddings = HuggingFaceEmbeddings(model_name=self.model_name)
+
+        # Initialize embeddings (runs locally, ONNX runtime via fastembed - no
+        # torch/CUDA dependency, which matters a lot on memory-constrained
+        # hosts. Same underlying model weights as the original HuggingFace/
+        # sentence-transformers path, just a much lighter runtime.)
+        self.embeddings = FastEmbedEmbeddings(model_name=self.model_name)
         
         # Initialize Chroma
         self.vector_store = Chroma(

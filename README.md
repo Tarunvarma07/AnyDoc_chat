@@ -27,7 +27,7 @@ Dense vector embeddings (like `all-MiniLM-L6-v2`) are powerful but can struggle 
 - **Dual-Engine Retrieval**: I implemented a Hybrid Search architecture, pairing ChromaDB (Semantic/Dense) with a local BM25 index (Keyword/Sparse).
 - **Reciprocal Rank Fusion (RRF)**: To combine these distinct scoring systems, I implemented RRF, which normalizes ranks and pushes the most universally relevant documents to the top.
 - **Observer Pattern**: A subtle but critical bug in many RAG systems is state drift. I implemented an Observer pattern so that anytime a new document is added to ChromaDB, the BM25 index is automatically invalidated and rebuilt, ensuring the two engines never go out of sync.
-- **Cross-Encoder Reranking**: Hybrid fusion widens recall but doesn't jointly score (query, document) pairs. When a `Reranker` is attached (`src/retrieval/reranker.py`), the retriever pulls a 3x wider RRF-fused candidate pool and re-scores it with a `cross-encoder/ms-marco-MiniLM-L-6-v2` model before returning the final top-N — trading a small amount of latency for materially better precision on the final cut. The model loads lazily on first query, so it never slows down app startup.
+- **Cross-Encoder Reranking**: Hybrid fusion widens recall but doesn't jointly score (query, document) pairs. When a `Reranker` is attached (`src/retrieval/reranker.py`), the retriever pulls a 3x wider RRF-fused candidate pool and re-scores it with a `ms-marco-MiniLM-L-6-v2` cross-encoder before returning the final top-N — trading a small amount of latency for materially better precision on the final cut. The model loads lazily on first query, so it never slows down app startup. Runs on [fastembed](https://github.com/qdrant/fastembed)'s ONNX runtime rather than sentence-transformers/PyTorch - see [Deployment & Memory Footprint](#-deployment--memory-footprint) below for why.
 - **Query Rewriting**: Before retrieval, `QueryRewriter` (`src/retrieval/query_rewriter.py`) asks the LLM to rewrite the user's raw question into a keyword-enriched search query — resolving vague references and surfacing likely synonyms/technical variants — while the *original* question is still what's used for answer generation and citation. If rewriting fails or the input trips the prompt-injection guardrail, it falls back to the original query untouched.
 
 ## 📊 Phase 6: Evaluation & Observability
@@ -54,6 +54,24 @@ I stripped away the generic "neon AI demo" aesthetic in favor of a clean, minima
 
 - **Docker**: `Dockerfile` builds a single image (FastAPI backend + Streamlit UI share the same image, differing only in the container `command`). `docker-compose.yml` runs both services together, wires the UI to the API over the Docker network (`API_URL=http://api:8000`), and persists the Chroma index in a named volume. `.dockerignore` explicitly excludes `.env`, `venv/`, and `chroma_db/` so secrets and local state never end up baked into an image layer.
 - **CI**: `.github/workflows/ci.yml` runs the full `pytest` suite on every push/PR to `main` (Ubuntu, Python 3.11, with `libmagic1` installed for the file-validation guardrail tests).
+
+## 🧮 Deployment & Memory Footprint
+
+Deploying `anydoc-api` to Render's free tier (512MB RAM) initially OOM-crashed on every deploy, before handling a single request. Root cause: `sentence-transformers` pulls in PyTorch as a dependency, and PyTorch's baseline memory footprint (C++ runtime, tensor allocator, etc.) alone was enough to exceed the limit once combined with FastAPI, ChromaDB, and the rest of the app.
+
+Fix: both the embedding model and the cross-encoder reranker were moved onto [fastembed](https://github.com/qdrant/fastembed) (Qdrant's ONNX-runtime-based library) instead of sentence-transformers/PyTorch - same underlying model weights (`sentence-transformers/all-MiniLM-L6-v2` for embeddings, an ONNX export of `cross-encoder/ms-marco-MiniLM-L-6-v2` for reranking via `langchain_community.embeddings.FastEmbedEmbeddings` and `fastembed.rerank.cross_encoder.TextCrossEncoder`), just without the multi-hundred-MB PyTorch runtime.
+
+**Measured peak RSS** in a clean environment matching `requirements.txt` (not the contaminated local dev venv - see below):
+
+| Stage | RSS |
+|---|---|
+| After all imports (FastAPI, ChromaDB, LangChain, fastembed) | ~88 MB |
+| After the embedding model loads | ~241 MB |
+| After the reranker also loads (first query) | ~364 MB |
+
+Comfortably under 512MB with headroom for request handling.
+
+One debugging note worth documenting: an early full-app measurement showed ~718MB - alarming, and wrong. `langchain-groq` and `langchain-text-splitters` were transitively importing PyTorch/`transformers`/`sentence-transformers` from *leftover packages still installed in the local dev venv* from before this migration, even though no code imports them anymore. A clean venv built strictly from `requirements.txt` (which no longer lists any of those three) never installs them in the first place, so the transitive import can't happen - matching what Render's Docker build actually does. Lesson: when profiling memory/dependencies, profile a clean install, not a dev environment that's accumulated packages over time.
 
 ---
 

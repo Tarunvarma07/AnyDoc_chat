@@ -10,11 +10,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# Install CPU-only torch first: the default PyPI wheel bundles CUDA and is
-# several GB, even though this app only ever runs embeddings/reranking on
-# CPU. Once this is installed, sentence-transformers' torch requirement is
-# already satisfied and pip won't pull the CUDA build in the next step.
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .

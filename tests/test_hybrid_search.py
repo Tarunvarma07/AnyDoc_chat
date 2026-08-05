@@ -8,26 +8,26 @@ from src.retrieval.hybrid_search import HybridRetriever
 def test_embed_store_consistency(tmp_path):
     # Test valid init
     db_path = str(tmp_path / "chroma_db")
-    store = EmbedStore(persist_directory=db_path, model_name="all-MiniLM-L6-v2", collection_name="test")
+    store = EmbedStore(persist_directory=db_path, model_name="sentence-transformers/all-MiniLM-L6-v2", collection_name="test")
     
     # Add a doc
     doc = Document(page_content="test document", metadata={"chunk_index": 0})
     store.add_documents([doc])
     
     # Test init again with same model
-    store2 = EmbedStore(persist_directory=db_path, model_name="all-MiniLM-L6-v2", collection_name="test")
+    store2 = EmbedStore(persist_directory=db_path, model_name="sentence-transformers/all-MiniLM-L6-v2", collection_name="test")
     docs = store2.get_all_documents()
     assert len(docs) == 1
     
     # Test init with wrong model - should fail consistency check
-    # We mock HuggingFaceEmbeddings so it doesn't try to download the fake model
-    with patch("src.pipeline.embed_store.HuggingFaceEmbeddings"):
+    # We mock FastEmbedEmbeddings so it doesn't try to download the fake model
+    with patch("src.pipeline.embed_store.FastEmbedEmbeddings"):
         with pytest.raises(ValueError, match="Embedding model mismatch"):
             EmbedStore(persist_directory=db_path, model_name="different-model-v1", collection_name="test")
 
 def test_hybrid_search(tmp_path):
     db_path = str(tmp_path / "chroma_db_2")
-    store = EmbedStore(persist_directory=db_path, model_name="all-MiniLM-L6-v2", collection_name="test2")
+    store = EmbedStore(persist_directory=db_path, model_name="sentence-transformers/all-MiniLM-L6-v2", collection_name="test2")
     
     docs = [
         Document(page_content="The quick brown fox jumps over the lazy dog.", metadata={"chunk_index": 1}),
@@ -51,7 +51,7 @@ def test_hybrid_search(tmp_path):
 
 def test_hybrid_search_dynamic_rebuild(tmp_path):
     db_path = str(tmp_path / "chroma_db_3")
-    store = EmbedStore(persist_directory=db_path, model_name="all-MiniLM-L6-v2", collection_name="test3")
+    store = EmbedStore(persist_directory=db_path, model_name="sentence-transformers/all-MiniLM-L6-v2", collection_name="test3")
     
     # Init empty retriever
     retriever = HybridRetriever(embed_store=store, top_n=2)
