@@ -277,9 +277,14 @@ def render_status(is_success: bool, message: str):
     st.markdown(f'<div class="status-alert {css_class}">{icon} <span>{message}</span></div>', unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=10, show_spinner=False)
 def fetch_stats():
+    # 45s tolerates a cold start on free-tier hosts (e.g. Render), where a
+    # sleeping backend can take 50+ seconds to wake on the first request.
+    # Cached for 10s so this page's 3 call sites collapse into one network
+    # round trip per rerun instead of independently racing the same wake-up.
     try:
-        res = requests.get(f"{API_URL}/stats", timeout=3)
+        res = requests.get(f"{API_URL}/stats", timeout=45)
         if res.status_code == 200:
             return res.json(), True
     except requests.exceptions.RequestException:
