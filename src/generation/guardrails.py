@@ -1,7 +1,6 @@
 import re
 import logging
 from typing import List
-from better_profanity import profanity
 from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
@@ -18,9 +17,30 @@ INJECTION_PATTERNS = [
     r"jailbreak"
 ]
 
-# Loads better_profanity's maintained, whole-word-matched default wordlist
-# once at import time instead of hand-rolling and maintaining our own list.
-profanity.load_censor_words()
+# Profanity blocklist, matched with strict \b...\b word boundaries against
+# the literal text only - no leetspeak/spacing normalization.
+#
+# We tried `better_profanity` first (a maintained library) instead of a
+# hand-rolled list, on the theory that a real maintained wordlist beats
+# reinventing one. In production that backfired: its fuzzy matching (built
+# to catch spaced-out evasion like "t e s t") strips whitespace before
+# matching, so two completely innocuous ADJACENT words can concatenate into
+# a flagged term - e.g. "...this test is grounded..." got censored because
+# "test" + "is" collapses to "testis". That's a worse failure mode than the
+# placeholder list it replaced: it silently blocked a correct, grounded
+# answer rather than just failing to catch anything. Strict per-word regex
+# matching against the literal text can't do that, at the cost of not
+# catching deliberately spaced-out evasion - an acceptable trade for a
+# demo-scale guardrail; a real moderation API is the right tool if that
+# matters.
+PROFANITY_WORDS = [
+    "fuck", "shit", "bitch", "asshole", "bastard", "dick", "cunt",
+    "piss", "slut", "whore", "damn", "crap",
+]
+_PROFANITY_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(w) for w in PROFANITY_WORDS) + r")\b",
+    re.IGNORECASE,
+)
 
 def check_prompt_injection(text: str) -> bool:
     """
@@ -40,14 +60,16 @@ def check_prompt_injection(text: str) -> bool:
 
 def check_profanity(text: str) -> bool:
     """
-    Scans text for profanity using better_profanity's maintained wordlist
-    (whole-word matched, so it doesn't flag substrings like "assessment").
+    Scans text for profanity using strict whole-word regex matching against
+    the literal text (see PROFANITY_WORDS above for why this isn't backed by
+    a fuzzy-matching library). Word-boundary matched, so it doesn't flag
+    substrings like "assessment", and doesn't concatenate adjacent words.
     Returns True if profanity is detected, False otherwise.
     """
     if not text:
         return False
 
-    if profanity.contains_profanity(text):
+    if _PROFANITY_PATTERN.search(text):
         logger.warning("Guardrail triggered: Profanity detected")
         return True
 

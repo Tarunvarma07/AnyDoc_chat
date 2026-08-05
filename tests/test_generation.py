@@ -17,11 +17,17 @@ def test_prompt_injection_guardrail():
     assert check_prompt_injection("Summarize this document.") == False
 
 def test_profanity_guardrail():
-    # better_profanity's maintained wordlist should catch real profanity...
+    # Should catch real profanity...
     assert check_profanity("This is a shit test") == True
     # ...but not flag substrings inside innocuous words (Scunthorpe problem)
     assert check_profanity("Please review the assessment document.") == False
     assert check_profanity("This is a clean test") == False
+    # Regression: better_profanity (tried and reverted - see guardrails.py)
+    # concatenated adjacent words before matching, so "test is" collapsed
+    # into "testis" and got flagged. A grounded, correct answer containing
+    # this exact phrase was refused in production because of it.
+    assert check_profanity("This test is grounded in the provided context.") == False
+    assert check_profanity("The secret verification code for this test is ANYDOC-E2E-77531.") == False
 
 def test_verify_citations():
     docs = [
