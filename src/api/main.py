@@ -47,6 +47,18 @@ def get_stats():
         "top_n": retriever.top_n,
     }
 
+@app.post("/evaluate")
+def run_evaluation_endpoint():
+    """
+    Runs the dense-vs-hybrid retrieval benchmark and returns the hit-rate
+    results. Reuses this process's already-loaded embedding model rather
+    than loading a second copy - this endpoint exists specifically so the
+    (memory-constrained) Streamlit frontend never has to spawn a subprocess
+    that loads its own duplicate model just to trigger this benchmark.
+    """
+    from src.evaluation.evaluator import run_evaluation
+    return run_evaluation(embeddings=embed_store.embeddings)
+
 class QueryRequest(BaseModel):
     query: str
 

@@ -21,7 +21,7 @@ services:
     dockerContext: .
     plan: free
     region: oregon
-    dockerCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    dockerCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false --server.enableWebsocketCompression false
     envVars:
       # Update this if Render assigns anydoc-api a different subdomain
       # (e.g. because "anydoc-api" was already taken) - see DEPLOY.md.

@@ -8,7 +8,7 @@ from langchain_community.vectorstores import Chroma
 logger = logging.getLogger(__name__)
 
 class EmbedStore:
-    def __init__(self, persist_directory: str = "./chroma_db", model_name: str = "sentence-transformers/all-MiniLM-L6-v2", collection_name: str = "qa_chatbot"):
+    def __init__(self, persist_directory: str = "./chroma_db", model_name: str = "sentence-transformers/all-MiniLM-L6-v2", collection_name: str = "qa_chatbot", embeddings=None):
         self.persist_directory = persist_directory
         self.model_name = model_name
         self.collection_name = collection_name
@@ -17,7 +17,16 @@ class EmbedStore:
         # torch/CUDA dependency, which matters a lot on memory-constrained
         # hosts. Same underlying model weights as the original HuggingFace/
         # sentence-transformers path, just a much lighter runtime.)
-        self.embeddings = FastEmbedEmbeddings(model_name=self.model_name)
+        #
+        # An already-constructed embeddings object can be passed in to reuse
+        # an already-loaded model instead of loading a second copy into
+        # memory - e.g. the /evaluate endpoint builds a temporary, isolated
+        # EmbedStore for its benchmark corpus but should reuse the production
+        # embed_store's warm model rather than instantiating a duplicate ONNX
+        # session, which mattered on a memory-constrained host (see Case 1 in
+        # the technical report; this pattern prevents the same class of bug
+        # recurring in a different code path).
+        self.embeddings = embeddings if embeddings is not None else FastEmbedEmbeddings(model_name=self.model_name)
         
         # Initialize Chroma
         self.vector_store = Chroma(

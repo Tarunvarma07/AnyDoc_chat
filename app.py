@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import os
-import sys
-import subprocess
-import ast
 from langchain_core.documents import Document
 from src.pipeline.chunk import compare_strategies
 
@@ -538,6 +535,13 @@ with tab_chat:
                             "pipeline": pipeline,
                             "query": query
                         })
+                        # Bound per-session memory: each message carries up to 5
+                        # source excerpts, so an unbounded chat history is real
+                        # (if modest) growth held in this process's memory for
+                        # as long as the browser session stays open.
+                        MAX_MESSAGES = 40
+                        if len(st.session_state.messages) > MAX_MESSAGES:
+                            st.session_state.messages = st.session_state.messages[-MAX_MESSAGES:]
                     else:
                         render_status(False, error_detail(res))
                 except requests.exceptions.RequestException as e:
@@ -592,61 +596,73 @@ with tab_chunking:
                 st.markdown('</div>', unsafe_allow_html=True)
 
 # --- TAB: EVALUATION ---
+
+# Last measured, committed results (see docs/AnyDoc_Technical_Report.pdf Section 6,
+# reproducible via `python src/evaluation/evaluator.py`). Shown by default instead
+# of always re-running the benchmark live: embedding a fresh 105-document corpus
+# is a real ~350MB, several-second operation - fine to run deliberately, but not
+# something that should happen just from a visitor loading this tab, especially
+# on a memory-constrained host.
+PRECOMPUTED_EVAL = {"total_queries": 8, "dense_hit_rate": 1.0, "hybrid_hit_rate": 1.0}
+
+
+def render_eval_results(eval_data, footer_note):
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">Dense-only Hit Rate</div>
+            <div class="metric-value" style="color: var(--accent);">{eval_data['dense_hit_rate']*100:.0f}%</div>
+            <div class="timing-metric">Target ranked in top 2 on {eval_data['total_queries']} queries</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">Hybrid (Dense + BM25) Hit Rate</div>
+            <div class="metric-value" style="color: var(--accent);">{eval_data['hybrid_hit_rate']*100:.0f}%</div>
+            <div class="timing-metric">Architecture validated, no regression</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+    chart_df = pd.DataFrame({
+        "Hit Rate %": [eval_data["dense_hit_rate"] * 100, eval_data["hybrid_hit_rate"] * 100]
+    }, index=["Dense-only", "Hybrid (RRF)"])
+    st.bar_chart(chart_df)
+
+    st.markdown(f"""
+    <div style="margin-top:24px; color: var(--text-secondary); font-size: 0.9em; text-align: center;">
+        <em>{footer_note}</em>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 with tab_eval:
     st.markdown("<p style='color: var(--text-secondary); margin-bottom: 24px;'>Benchmark Dense (Vector) vs Hybrid Retrieval on a fixed, isolated 105-document adversarial corpus.</p>", unsafe_allow_html=True)
 
-    if st.button("Run Evaluation Benchmark", key="btn_eval"):
-        with st.spinner("Provisioning temporary database and running evaluation..."):
-            try:
-                env = os.environ.copy()
-                env["PYTHONPATH"] = "."
-                result = subprocess.check_output(
-                    [sys.executable, 'src/evaluation/evaluator.py'],
-                    cwd=os.path.dirname(os.path.abspath(__file__)),
-                    env=env
-                ).decode('utf-8')
+    render_eval_results(
+        PRECOMPUTED_EVAL,
+        "Last measured result on a fixed 105-document benchmark corpus, isolated from the live database. "
+        "Reproducible via `python src/evaluation/evaluator.py`."
+    )
 
-                eval_data = None
-                for line in result.split('\n'):
-                    if "Evaluation Results:" in line:
-                        eval_data = ast.literal_eval(line.replace("Evaluation Results: ", "").strip())
-                        break
-
-                if eval_data:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Dense-only Hit Rate</div>
-                            <div class="metric-value" style="color: var(--accent);">{eval_data['dense_hit_rate']*100:.0f}%</div>
-                            <div class="timing-metric">Target ranked in top 2 on {eval_data['total_queries']} queries</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with col2:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Hybrid (Dense + BM25) Hit Rate</div>
-                            <div class="metric-value" style="color: var(--accent);">{eval_data['hybrid_hit_rate']*100:.0f}%</div>
-                            <div class="timing-metric">Architecture validated, no regression</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
-                    chart_df = pd.DataFrame({
-                        "Hit Rate %": [eval_data["dense_hit_rate"] * 100, eval_data["hybrid_hit_rate"] * 100]
-                    }, index=["Dense-only", "Hybrid (RRF)"])
-                    st.bar_chart(chart_df)
-
-                    st.markdown("""
-                    <div style="margin-top:24px; color: var(--text-secondary); font-size: 0.9em; text-align: center;">
-                        <em>Evaluated on a fixed 105-document benchmark corpus, isolated from the live database.</em>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    render_status(False, "Failed to parse evaluation output.")
-                    with st.expander("Raw Output"):
-                        st.code(result)
-            except subprocess.CalledProcessError as e:
-                render_status(False, f"Evaluation script failed: {e}")
-                with st.expander("Error Details"):
-                    st.code(e.output.decode('utf-8', errors='ignore'))
+    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+    with st.expander("Re-run live (embeds a fresh 105-document corpus - real compute, not instant)"):
+        st.markdown(
+            "<p class='timing-metric'>This calls POST /evaluate on the backend and embeds the full "
+            "benchmark corpus from scratch. It's a genuine, several-second computation - not cached - "
+            "so only run it if you want to verify the numbers live rather than trust the figures above.</p>",
+            unsafe_allow_html=True
+        )
+        if st.button("Run Evaluation Benchmark", key="btn_eval"):
+            with st.spinner("Running evaluation on the backend..."):
+                try:
+                    res = requests.post(f"{API_URL}/evaluate", timeout=170)
+                    eval_data = res.json() if res.status_code == 200 else None
+                    if eval_data:
+                        render_eval_results(eval_data, "Freshly computed just now against the live backend.")
+                    else:
+                        render_status(False, error_detail(res))
+                except requests.exceptions.RequestException as e:
+                    render_status(False, f"Backend API is offline or timed out: {e}")
