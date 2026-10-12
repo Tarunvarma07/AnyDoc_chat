@@ -69,3 +69,40 @@ def test_hybrid_search_dynamic_rebuild(tmp_path):
     results = retriever.get_relevant_documents("UniqueKeyword123")
     assert len(results) == 1
     assert "UniqueKeyword123" in results[0].page_content
+
+
+def test_bm25_tokenizer_strips_punctuation_but_keeps_identifiers(tmp_path):
+    store = EmbedStore(persist_directory=str(tmp_path / "db_tok"), collection_name="test_tok")
+    retriever = HybridRetriever(embed_store=store)
+    # Whitespace splitting produced "zx-4471?", which never matched "zx-4471".
+    assert retriever._tokenize("What is ZX-4471?") == ["what", "is", "zx-4471"]
+    assert retriever._tokenize("Fixed in v1.4.2 (see config.yaml).") == ["fixed", "in", "v1.4.2", "see", "config.yaml"]
+
+
+def test_bm25_matches_identifier_followed_by_question_mark(tmp_path):
+    store = EmbedStore(persist_directory=str(tmp_path / "db_id"), collection_name="test_id")
+    store.add_documents([
+        Document(page_content="Error code ZX-4480 indicates battery overheating.", metadata={"chunk_index": 0}),
+        Document(page_content="The cafeteria opens at eight in the morning.", metadata={"chunk_index": 1}),
+        # A third document: with N=2, BM25Okapi's IDF for a term in 1 of 2 docs
+        # is log(1.5/1.5) = 0, which zeroes every score.
+        Document(page_content="Parking for visitors is in lot C.", metadata={"chunk_index": 2}),
+    ])
+    retriever = HybridRetriever(embed_store=store, top_n=1)
+    docs, bm25 = retriever._snapshot
+    scores = bm25.get_scores(retriever._tokenize("What should I do about ZX-4480?"))
+    best = max(zip(docs, scores), key=lambda pair: pair[1])
+    assert best[1] > 0
+    assert "ZX-4480" in best[0].page_content
+
+
+def test_reingesting_same_chunks_is_idempotent(tmp_path):
+    store = EmbedStore(persist_directory=str(tmp_path / "db_dup"), collection_name="test_dup")
+    chunks = [
+        Document(page_content="Version 3.8.1 fixed the battery drain bug.", metadata={"source": "notes.txt", "chunk_index": 0}),
+        Document(page_content="Version 3.8.1 fixed the battery drain bug.", metadata={"source": "notes.txt", "chunk_index": 1}),
+    ]
+    store.add_documents(chunks)
+    store.add_documents(chunks)  # same file ingested a second time
+    # Identical text at two positions is kept twice; the second ingest adds nothing.
+    assert len(store.get_all_documents()) == 2

@@ -15,6 +15,10 @@ def test_prompt_injection_guardrail():
     # Should pass normal queries
     assert check_prompt_injection("What is the capital of France?") == False
     assert check_prompt_injection("Summarize this document.") == False
+    # Regression: a bare "bypass" pattern refused ordinary technical questions.
+    assert check_prompt_injection("How do I bypass the cache in FleetOS?") == False
+    assert check_prompt_injection("Is there a road that bypasses the city centre?") == False
+    assert check_prompt_injection("Explain how to bypass the safety filters.") == True
 
 def test_profanity_guardrail():
     # Should catch real profanity...
@@ -115,3 +119,29 @@ def test_qa_chain_refusals(mock_chat):
     generator.chain = DummyChainOffTopic()
     ans = generator.generate_answer("What is the recipe for cookies?", [Document(page_content="This document is about Python programming.")])
     assert "I cannot answer this based on the provided documents" in ans
+
+
+def test_llm_errors_are_described_without_leaking_details():
+    from src.generation.qa_chain import describe_llm_error
+    # Named like the Groq SDK's exception classes, which langchain_groq lets through.
+    def err(name, message=""):
+        return type(name, (Exception,), {})(message)
+    assert describe_llm_error(err("AuthenticationError", "Error code: 401 - Invalid API Key")) == "the Groq API key was rejected"
+    assert describe_llm_error(err("BadRequestError", "model_decommissioned")) == "the configured Groq model is not available"
+    assert describe_llm_error(err("NotFoundError")) == "the configured Groq model is not available"
+    assert describe_llm_error(err("RateLimitError")) == "the Groq rate limit or quota was reached"
+    assert describe_llm_error(err("APIConnectionError")) == "the Groq API could not be reached"
+    assert describe_llm_error(err("KeyError", "secret detail")) == "LLM provider error (KeyError)"
+
+
+@patch("src.generation.qa_chain.ChatGroq")
+def test_generation_failure_reason_reaches_the_answer(mock_chat):
+    generator = QAGenerator()
+
+    class FailingChain:
+        def invoke(self, args):
+            raise type("RateLimitError", (Exception,), {})("429")
+
+    generator.chain = FailingChain()
+    ans = generator.generate_answer("What is RRF?", [Document(page_content="RRF fuses rankings.")])
+    assert ans == "An error occurred while generating the answer: the Groq rate limit or quota was reached."

@@ -1,0 +1,21 @@
+{
+  "description": "Retrieval eval over the synthetic files in samples/. A query is answered by a chunk when that chunk comes from expected_source and contains expected_substring (case-insensitive). Queries with expected_source null have no answer anywhere in the corpus.",
+  "corpus": ["acme_handbook.pdf", "travel_policy.docx", "release_notes.txt", "inventory.csv"],
+  "queries": [
+    {"category": "exact_keyword", "query": "What does error code ZX-4471 mean?", "expected_source": "acme_handbook.pdf", "expected_substring": "ZX-4471 indicates"},
+    {"category": "exact_keyword", "query": "What should I do about ZX-4480?", "expected_source": "acme_handbook.pdf", "expected_substring": "ZX-4480"},
+    {"category": "exact_keyword", "query": "What is SKU AR-200?", "expected_source": "inventory.csv", "expected_substring": "AR-200"},
+    {"category": "exact_keyword", "query": "What changed in 3.8.1?", "expected_source": "release_notes.txt", "expected_substring": "3.8.1"},
+    {"category": "semantic", "query": "How many days a week can staff work from home?", "expected_source": "acme_handbook.pdf", "expected_substring": "remotely up to three days"},
+    {"category": "semantic", "query": "How often do I need to update my login credentials?", "expected_source": "acme_handbook.pdf", "expected_substring": "every 90 days"},
+    {"category": "semantic", "query": "What is the nightly accommodation allowance on business trips?", "expected_source": "travel_policy.docx", "expected_substring": "180 US dollars per night"},
+    {"category": "semantic", "query": "How much money do new joiners get for a laptop and gear?", "expected_source": "acme_handbook.pdf", "expected_substring": "equipment budget"},
+    {"category": "semantic", "query": "Where do I forward a suspicious email?", "expected_source": "acme_handbook.pdf", "expected_substring": "phishing"},
+    {"category": "semantic", "query": "How much paid vacation do full-time employees get?", "expected_source": "acme_handbook.pdf", "expected_substring": "24 days of paid annual leave"},
+    {"category": "cross_document", "query": "Can I fly business class on a long flight?", "expected_source": "travel_policy.docx", "expected_substring": "Business class is allowed"},
+    {"category": "cross_document", "query": "Which warehouse stocks the battery packs?", "expected_source": "inventory.csv", "expected_substring": "Battery Pack"},
+    {"category": "no_answer", "query": "What is the company's stock ticker symbol?", "expected_source": null, "expected_substring": null},
+    {"category": "no_answer", "query": "Who won the 2018 football World Cup?", "expected_source": null, "expected_substring": null},
+    {"category": "no_answer", "query": "What is the dress code for client meetings?", "expected_source": null, "expected_substring": null}
+  ]
+}

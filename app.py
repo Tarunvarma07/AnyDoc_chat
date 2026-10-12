@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 import pandas as pd
 import requests
@@ -304,6 +305,16 @@ def error_detail(res):
         return f"Request failed ({res.status_code}): {snippet}"
 
 
+# Answers that are refusals rather than content. The guardrail ones come from
+# src/generation/qa_chain.py. They are rendered inside raw HTML, so the text is
+# escaped first: the LLM's output can echo instructions planted in documents.
+REFUSAL_PREFIXES = ("I cannot answer", "The generated answer", "I cannot fulfill")
+
+
+def page_label(src):
+    return f" (p. {src['page']})" if src.get("page") else ""
+
+
 def render_metric_card(label, value, sub=""):
     st.markdown(f"""
     <div class="metric-card">
@@ -457,7 +468,7 @@ with tab_chat:
                     score = src.get("rerank_score")
                     score_str = f"score: `{score:.3f}`" if score is not None else ""
                     filename = src.get('source', 'unknown').split('/')[-1].split('\\')[-1]
-                    st.markdown(f"- `[{src['id']}]` **{filename}** {score_str}")
+                    st.markdown(f"- `[{src['id']}]` **{filename}**{page_label(src)} {score_str}")
 
             if timings:
                 c1, c2, c3 = st.columns(3)
@@ -467,9 +478,9 @@ with tab_chat:
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            is_refusal = msg["content"].strip().startswith("I cannot answer") or msg["content"].strip().startswith("The generated answer")
+            is_refusal = msg["content"].strip().startswith(REFUSAL_PREFIXES)
             if msg["role"] == "assistant" and is_refusal:
-                st.markdown(f'<div class="refusal-box"><div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; font-weight:600;">{ICON_ALERT} Refusal / Guardrail triggered</div>{msg["content"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="refusal-box"><div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; font-weight:600;">{ICON_ALERT} Refusal / Guardrail triggered</div>{html.escape(msg["content"])}</div>', unsafe_allow_html=True)
             else:
                 st.markdown(msg["content"])
 
@@ -479,7 +490,7 @@ with tab_chat:
                     filename = src.get('source', 'unknown').split('/')[-1].split('\\')[-1]
                     if filename not in grouped_sources:
                         grouped_sources[filename] = []
-                    grouped_sources[filename].append(f"**Chunk [{i}]**\n_{src['content']}_")
+                    grouped_sources[filename].append(f"**Chunk [{i}]**{page_label(src)}\n_{src['content']}_")
 
                 for filename, chunks in grouped_sources.items():
                     with st.expander(f"📚 {filename}"):
@@ -506,9 +517,9 @@ with tab_chat:
                         search_query = data.get("search_query", "")
                         pipeline = data.get("pipeline", {})
 
-                        is_refusal = content.strip().startswith("I cannot answer") or content.strip().startswith("The generated answer")
+                        is_refusal = content.strip().startswith(REFUSAL_PREFIXES)
                         if is_refusal:
-                            st.markdown(f'<div class="refusal-box"><div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; font-weight:600;">{ICON_ALERT} Refusal / Guardrail triggered</div>{content}</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="refusal-box"><div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; font-weight:600;">{ICON_ALERT} Refusal / Guardrail triggered</div>{html.escape(content)}</div>', unsafe_allow_html=True)
                         else:
                             st.markdown(content)
 
@@ -518,7 +529,7 @@ with tab_chat:
                                 filename = src.get('source', 'unknown').split('/')[-1].split('\\')[-1]
                                 if filename not in grouped_sources:
                                     grouped_sources[filename] = []
-                                grouped_sources[filename].append(f"**Chunk [{i}]**\n_{src['content']}_")
+                                grouped_sources[filename].append(f"**Chunk [{i}]**{page_label(src)}\n_{src['content']}_")
 
                             for filename, chunks in grouped_sources.items():
                                 with st.expander(f"📚 {filename}"):
@@ -554,46 +565,45 @@ with tab_chunking:
     sample_text = st.text_area("Input Text", height=150,
                                value="This is a sentence. And another one! But what happens if we have a very long sentence that just keeps going and going and going without stopping for a long time, causing the chunker to forcefully break it apart? Here is a list:\n- Item 1\n- Item 2\n- Item 3.")
 
+    # The pipeline itself uses 500; smaller sizes make the strategies' different
+    # split points visible on a paragraph-length sample.
+    chunk_size = st.slider("Chunk size (characters)", min_value=50, max_value=1000, value=120, step=10)
+    chunk_overlap = min(50, chunk_size // 5)
+    st.markdown(f"<p class='timing-metric'>Overlap: {chunk_overlap} characters. The ingestion pipeline uses 500 / 50.</p>", unsafe_allow_html=True)
+
     if st.button("Evaluate Strategies", key="btn_chunk"):
         doc = Document(page_content=sample_text, metadata={"source": "manual_input"})
         with st.spinner("Analyzing chunks..."):
-            report = compare_strategies(doc)
+            report = compare_strategies(doc, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
             col1, col2 = st.columns(2)
 
-            def render_chunk_metric(label, value, is_good):
+            def chunk_metric_row(label, value, is_good):
                 icon = ICON_CHECK if is_good else ICON_WARN
                 color = "var(--accent)" if is_good else "var(--warn)"
+                # Single line: a blank line inside st.markdown would end the HTML block.
+                return (f'<div style="display:flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">'
+                        f'<span class="metric-label">{label}</span>'
+                        f'<span style="display:flex; align-items:center; gap:4px; font-family: \'JetBrains Mono\', monospace; font-weight:600; color:{color};">{value} {icon}</span>'
+                        f'</div>')
+
+            def render_strategy_card(title, stats):
+                # One markdown call per card: Streamlit closes unbalanced HTML in
+                # each call, so an opening <div> on its own renders an empty box.
                 st.markdown(f"""
-                <div style="display:flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
-                    <span class="metric-label">{label}</span>
-                    <span style="display:flex; align-items:center; gap:4px; font-family: 'JetBrains Mono', monospace; font-weight:600; color:{color};">
-                        {value} {icon}
-                    </span>
-                </div>
-                """, unsafe_allow_html=True)
+                <div class="metric-card">
+                    <h3 style="margin-top:0;">{title}</h3>
+                    <div class="metric-value">{stats["count"]}</div>
+                    <div class="metric-label" style="margin-bottom:16px;">Total Chunks</div>
+                    {chunk_metric_row("Fragments (< 50 chars)", stats["fragment_count"], stats["fragment_count"] == 0)}
+                    {chunk_metric_row("No terminal punctuation", stats["no_terminal_punct_count"], stats["no_terminal_punct_count"] == 0)}
+                    {chunk_metric_row(f"Largest chunk (limit {chunk_size})", stats["max_length"], stats["max_length"] <= chunk_size)}
+                </div>""", unsafe_allow_html=True)
 
             with col1:
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown("### Recursive Character")
-                stats = report["recursive"]
-                st.markdown(f'<div class="metric-value">{stats["total_chunks"]}</div>', unsafe_allow_html=True)
-                st.markdown('<div class="metric-label" style="margin-bottom:16px;">Total Chunks</div>', unsafe_allow_html=True)
-
-                render_chunk_metric("Fragments", stats["fragments_detected"], stats["fragments_detected"] == 0)
-                render_chunk_metric("Mid-sentence cuts", stats["mid_sentence_cuts"], stats["mid_sentence_cuts"] == 0)
-                st.markdown('</div>', unsafe_allow_html=True)
-
+                render_strategy_card("Recursive Character", report["recursive"])
             with col2:
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown("### Character Splitter")
-                stats = report["character"]
-                st.markdown(f'<div class="metric-value">{stats["total_chunks"]}</div>', unsafe_allow_html=True)
-                st.markdown('<div class="metric-label" style="margin-bottom:16px;">Total Chunks</div>', unsafe_allow_html=True)
-
-                render_chunk_metric("Fragments", stats["fragments_detected"], stats["fragments_detected"] == 0)
-                render_chunk_metric("Mid-sentence cuts", stats["mid_sentence_cuts"], stats["mid_sentence_cuts"] == 0)
-                st.markdown('</div>', unsafe_allow_html=True)
+                render_strategy_card("Character Splitter", report["character"])
 
 # --- TAB: EVALUATION ---
 

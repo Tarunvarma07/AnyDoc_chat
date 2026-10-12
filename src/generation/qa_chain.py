@@ -8,6 +8,25 @@ from src.generation.guardrails import check_prompt_injection, check_profanity, v
 
 logger = logging.getLogger(__name__)
 
+
+def describe_llm_error(e: Exception) -> str:
+    """
+    A short, user-safe reason for an LLM call failure, so the UI says why
+    instead of a bare "An error occurred". Keyed on the Groq SDK's exception
+    class names; neither those nor their messages contain the API key.
+    """
+    name = type(e).__name__
+    message = str(e).lower()
+    if name == "NotFoundError" or "decommissioned" in message or "model_not_found" in message:
+        return "the configured Groq model is not available"
+    if name in ("AuthenticationError", "PermissionDeniedError") or "invalid api key" in message:
+        return "the Groq API key was rejected"
+    if name == "RateLimitError":
+        return "the Groq rate limit or quota was reached"
+    if name in ("APIConnectionError", "APITimeoutError"):
+        return "the Groq API could not be reached"
+    return f"LLM provider error ({name})"
+
 class QAGenerator:
     def __init__(self, model_name: str = "llama-3.1-8b-instant"):
         if "GROQ_API_KEY" not in os.environ:
@@ -70,7 +89,7 @@ Answer:""",
             answer = response.content
         except Exception as e:
             logger.error(f"LLM Generation failed: {e}")
-            return "An error occurred while generating the answer."
+            return f"An error occurred while generating the answer: {describe_llm_error(e)}."
 
         # 4. Output Guardrails
         if check_profanity(answer):

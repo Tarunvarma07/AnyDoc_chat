@@ -1,0 +1,2 @@
+# Sample PDFs are plain ASCII; keep git from rewriting their line endings (would break xref offsets).
+*.pdf binary

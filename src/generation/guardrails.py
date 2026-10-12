@@ -13,7 +13,9 @@ INJECTION_PATTERNS = [
     r"forget.{0,20}all.{0,20}(instructions|commands)",
     r"disregard.{0,20}previous",
     r"base.{0,20}prompt",
-    r"bypass",
+    # A bare "bypass" refused ordinary questions ("How do I bypass the cache?"),
+    # so require a safety-related object nearby.
+    r"bypass.{0,30}(security|safety|guardrail|filter|restriction|rule|instruction|polic|check)",
     r"jailbreak"
 ]
 

@@ -26,17 +26,22 @@ class LinkReader:
             rp = urllib.robotparser.RobotFileParser()
             rp.set_url(f"{base_url}/robots.txt")
             try:
-                # set a timeout for robots.txt fetch
-                import socket
-                socket.setdefaulttimeout(5)
-                rp.read()
+                # Fetched through resolve_safe_url rather than rp.read(): urllib
+                # follows redirects on its own, so a public site could redirect
+                # robots.txt to an internal address without any hop being checked.
+                # Status handling mirrors RobotFileParser.read().
+                robots_url = resolve_safe_url(f"{base_url}/robots.txt")
+                resp = requests.get(robots_url, timeout=5, allow_redirects=False)
+                if resp.status_code in (401, 403):
+                    rp.disallow_all = True
+                elif 400 <= resp.status_code < 500:
+                    rp.allow_all = True
+                elif resp.ok:
+                    rp.parse(resp.text.splitlines())
             except Exception as e:
+                # The parser is left unread, so can_fetch() returns False and
+                # the page is skipped (fail closed).
                 logger.warning(f"Could not read robots.txt for {base_url}: {e}")
-                # If we can't read it, we assume we can fetch
-                pass
-            finally:
-                import socket
-                socket.setdefaulttimeout(None)
             self._robot_parsers[base_url] = rp
             
         return self._robot_parsers[base_url].can_fetch("*", url)
@@ -76,7 +81,8 @@ class LinkReader:
             return []
             
         try:
-            loader = WebBaseLoader(safe_final_url)
+            # raise_for_status: without it a 404/500 error page is ingested as content.
+            loader = WebBaseLoader(safe_final_url, raise_for_status=True)
             # Since we already resolved redirects safely, disable auto-following in WebBaseLoader
             loader.requests_kwargs = {'timeout': 10, 'allow_redirects': False} 
             docs = loader.load()
