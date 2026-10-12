@@ -1,6 +1,8 @@
 # AnyDoc - Universal RAG Agent Architecture
 
-This document outlines the complete architectural journey of building a production-grade Universal RAG Agent, detailing the security, performance, and UI decisions made across development.
+This document outlines the complete architectural journey of building a Universal RAG Agent, detailing the security, performance, and UI decisions made across development.
+
+For a code-verified reference, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (architecture, design trade-offs, known limitations), [`docs/DEMO.md`](docs/DEMO.md) (Windows demo runbook) and [`docs/AUDIT_REPORT.md`](docs/AUDIT_REPORT.md) (audit findings, fixes and test results).
 
 A short technical report (architecture, evaluation methodology/results, related work) is available at [`docs/AnyDoc_Technical_Report.pdf`](docs/AnyDoc_Technical_Report.pdf).
 
@@ -10,13 +12,14 @@ Want a live deployment instead of running locally? See [`DEPLOY.md`](DEPLOY.md) 
 
 I began by establishing a robust document ingestion pipeline capable of parsing PDFs, TXT, CSV, and DOCX files. 
 - **Chunking Strategy**: Rather than relying on simple character splits which often result in mid-sentence cuts and orphaned fragments, I implemented `RecursiveCharacterTextSplitter`.
-- **Validation**: I built a visual comparison tool (available in the Chunking Analysis tab) to prove that my recursive strategy drastically reduces fragments and preserves semantic boundaries compared to naive splitting.
+- **Validation**: I built a visual comparison tool (the Chunking Lab tab) that runs both strategies on the same text and reports chunk count, fragments (< 50 chars) and chunks that end without terminal punctuation.
 
 ## 🛡️ Phase 3 & 4: Security & SSRF Protection
 
-A major architectural focus was securing the web crawler. Naive web ingestors are highly vulnerable to Server-Side Request Forgery (SSRF).
+A major architectural focus was securing web ingestion. A URL is fetched together with up to 5 same-host links found on that page (depth 1, static HTML via `WebBaseLoader`; no JavaScript rendering, no recursive crawling), honouring robots.txt. Naive web ingestors are highly vulnerable to Server-Side Request Forgery (SSRF).
 - **Guardrails**: I built a custom DNS resolution and IP validation layer.
-- **Fail-Close Architecture**: The system proactively blocks private IPs (10.x.x.x, 127.x.x.x, 192.168.x.x), AWS metadata endpoints (169.254.169.254), and prevents redirects from traversing back into internal networks (`resolve_safe_url`).
+- **Fail-Close Architecture**: Every address a hostname resolves to (IPv4 and IPv6) must be globally routable, which blocks private (10.x, 172.16-31.x, 192.168.x), loopback, link-local/cloud metadata (169.254.169.254), shared CGNAT space (100.64.0.0/10, e.g. 100.100.100.200) and IPv6 equivalents. Redirects are followed manually and every hop is re-validated (`resolve_safe_url`), including the robots.txt fetch. Known gap: DNS rebinding between validation and connection is not prevented (see `docs/ARCHITECTURE.md`).
+- **Upload validation**: size limit (10 MB), content type from magic bytes (not the extension), and the content must match the extension, so a renamed file is rejected with a 400.
 
 > [!WARNING]
 > Security in RAG isn't just about prompt injection. If your agent can scrape URLs, it is a vector for SSRF. My explicit IP resolution prevents the agent from being weaponized against internal infrastructure.
@@ -42,6 +45,8 @@ To prove the efficacy of the system, I built an isolated, reproducible evaluatio
   | Hybrid (Dense + BM25, RRF-fused) | 8/8 (100%) | No regression vs. dense-only |
 
   At this corpus size, `all-MiniLM-L6-v2` alone is already strong enough that both modes saturate — which is itself the useful finding: the evaluation proves the Hybrid architecture is correctly wired and introduces zero regression versus dense-only, and is positioned to pay off at larger scale, where dense vector dilution and exact-match misses (IDs, codes, version strings) become more common. The harness is intentionally corpus-swappable, so this is the first thing to scale up if extending this project further.
+
+- **Retrieval-mode comparison on the demo corpus** (`python src/evaluation/demo_retrieval_eval.py`, no API key needed): the synthetic files in `samples/` (10 chunks) with 12 labelled answerable and 3 no-answer questions in `samples/demo_eval_set.json`, scored as Hit@K / MRR@5 for dense-only, BM25-only, hybrid (RRF) and hybrid + cross-encoder rerank. On this small set the reranked pipeline puts the relevant chunk first for all 12 answerable queries (dense-only: 9/12). It is a wiring check on known cases, not evidence of performance at scale, and neither benchmark exercises query rewriting or measures generated-answer quality.
 
 ## 🎨 Final Polish: Dashboard-Grade UI
 
