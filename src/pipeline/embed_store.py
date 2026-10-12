@@ -1,4 +1,5 @@
 import os
+import hashlib
 import logging
 from typing import List
 from langchain_core.documents import Document
@@ -73,13 +74,23 @@ class EmbedStore:
         """Embeds and stores documents in ChromaDB."""
         if not documents:
             return
-            
-        self.vector_store.add_documents(documents)
+
+        # Deterministic IDs make re-ingesting the same file/URL idempotent:
+        # LangChain's Chroma wrapper upserts by ID, so identical chunks replace
+        # themselves instead of piling up as duplicates that then crowd the
+        # top-k results. chunk_index keeps IDs unique within one batch.
+        ids = [self._chunk_id(doc) for doc in documents]
+        self.vector_store.add_documents(documents, ids=ids)
         logger.info(f"Added {len(documents)} documents to vector store.")
         
         # Notify listeners that the index has changed
         for cb in self.on_document_added_callbacks:
             cb()
+
+    @staticmethod
+    def _chunk_id(doc: Document) -> str:
+        key = f"{doc.metadata.get('source', '')}|{doc.metadata.get('chunk_index', '')}|{doc.page_content}"
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     def as_retriever(self, search_kwargs=None):
         """Returns a vector store retriever."""

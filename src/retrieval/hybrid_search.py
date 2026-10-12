@@ -1,4 +1,6 @@
 import logging
+import re
+import threading
 import time
 from typing import List, Dict, Tuple
 from langchain_core.documents import Document
@@ -7,6 +9,11 @@ from rank_bm25 import BM25Okapi
 from src.pipeline.embed_store import EmbedStore
 
 logger = logging.getLogger(__name__)
+
+# A word, optionally joined to more words by "-" or "." - so identifiers such as
+# "ZX-4471", "v1.4.2" and "config.yaml" stay single tokens, while surrounding
+# punctuation ("ZX-4471?", "(see 3.8.1)") is dropped.
+_TOKEN_PATTERN = re.compile(r"\w+(?:[-.]\w+)*")
 
 class HybridRetriever:
     def __init__(self, embed_store: EmbedStore, k: int = 60, top_n: int = 5, reranker=None, candidate_n: int = None):
@@ -21,6 +28,7 @@ class HybridRetriever:
         self.last_run_stats = {}
 
         # Build the initial BM25 index from all stored documents
+        self._rebuild_lock = threading.Lock()
         self.docs = []
         self.bm25 = None
         self.rebuild_index()
@@ -30,20 +38,34 @@ class HybridRetriever:
         
     def rebuild_index(self):
         """Pulls all documents from the vector store and rebuilds the BM25 index."""
-        all_docs = self.embed_store.get_all_documents()
-        self.docs = all_docs
-        
-        if all_docs:
-            tokenized_corpus = [self._tokenize(doc.page_content) for doc in all_docs]
-            self.bm25 = BM25Okapi(tokenized_corpus)
-            logger.info(f"Built BM25 index over {len(all_docs)} documents.")
-        else:
-            self.bm25 = None
-            logger.warning("No documents found in store to build BM25 index.")
+        # Serialized: two ingests rebuilding in parallel could otherwise finish
+        # out of order, leaving the older read (missing the other ingest's
+        # chunks) as the published index.
+        with self._rebuild_lock:
+            all_docs = self.embed_store.get_all_documents()
+
+            bm25 = None
+            if all_docs:
+                tokenized_corpus = [self._tokenize(doc.page_content) for doc in all_docs]
+                bm25 = BM25Okapi(tokenized_corpus)
+                logger.info(f"Built BM25 index over {len(all_docs)} documents.")
+            else:
+                logger.warning("No documents found in store to build BM25 index.")
+
+            # Queries read the (docs, index) pair through this single attribute, so
+            # one running concurrently in another request thread during an ingest
+            # never pairs the new docs list with the old index's scores.
+            self._snapshot = (all_docs, bm25)
+            self.docs, self.bm25 = all_docs, bm25
 
     def _tokenize(self, text: str) -> List[str]:
-        """Simple tokenizer for BM25. Converts to lowercase and splits on whitespace."""
-        return text.lower().split()
+        """
+        Tokenizer for BM25: lowercase word/identifier tokens. Splitting on
+        whitespace alone left punctuation attached, so the query "What is
+        ZX-4471?" produced the token "zx-4471?", which never matched the
+        document's "zx-4471" - the exact-match case BM25 is here for.
+        """
+        return _TOKEN_PATTERN.findall(text.lower())
 
     def _rrf(self, dense_results: List[Document], sparse_results: List[Document], top_n: int = None) -> List[Document]:
         """Applies Reciprocal Rank Fusion to merge dense and sparse results."""
@@ -78,7 +100,8 @@ class HybridRetriever:
     def get_relevant_documents(self, query: str) -> List[Document]:
         """Runs the hybrid search, optionally reranks, and returns the top results."""
         start_time = time.time()
-        if not self.docs or not self.bm25:
+        docs, bm25 = self._snapshot
+        if not docs or not bm25:
             logger.warning("HybridRetriever has no documents. Returning empty list.")
             return []
 
@@ -87,10 +110,10 @@ class HybridRetriever:
         # 1. Sparse Search (BM25)
         tokenized_query = self._tokenize(query)
         # Get top candidates from sparse
-        sparse_scores = self.bm25.get_scores(tokenized_query)
+        sparse_scores = bm25.get_scores(tokenized_query)
 
         # Filter and sort docs by score
-        scored_docs = [(doc, score) for doc, score in zip(self.docs, sparse_scores) if score > 0]
+        scored_docs = [(doc, score) for doc, score in zip(docs, sparse_scores) if score > 0]
         scored_docs.sort(key=lambda x: x[1], reverse=True)
         sparse_results = [doc for doc, score in scored_docs[:fetch_n]]
 

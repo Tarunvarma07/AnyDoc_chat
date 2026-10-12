@@ -1,0 +1,7 @@
+Release notes for Acme FleetOS.
+
+Version 3.8.1 fixed the battery drain bug that occurred in idle mode.
+
+Version 3.9.0 added support for autonomous docking at charging stations.
+
+Version 4.0.0 replaced the route planner and requires firmware 2.2 or newer.
