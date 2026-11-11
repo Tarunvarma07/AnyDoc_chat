@@ -1,8 +1,10 @@
 import ipaddress
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 import socket
 import magic
+import requests
+from requests.adapters import HTTPAdapter
 
 class SecurityError(Exception):
     """Raised when a security guardrail is violated."""
@@ -88,17 +90,73 @@ def validate_url(url: str) -> bool:
 
     return True
 
-def resolve_safe_url(url: str, max_redirects: int = 5) -> str:
+class PinnedIPAdapter(HTTPAdapter):
+    """
+    Transport adapter that closes the DNS-rebinding gap.
+
+    validate_url() resolves a hostname to check it, but requests would resolve
+    it again when connecting - and a hostile DNS server can answer "public" the
+    first time and "internal" the second. This adapter resolves exactly once,
+    rejects the request if any address is internal, then connects to that
+    validated IP directly. The original hostname is kept for the Host header,
+    the TLS SNI and certificate verification, so HTTPS still checks the real
+    site's certificate.
+    """
+
+    def send(self, request, **kwargs):
+        parsed = urlparse(request.url)
+        if parsed.scheme not in ("http", "https"):
+            raise SecurityError(f"Invalid URL scheme: '{parsed.scheme}'. Only http and https are allowed.")
+        host = parsed.hostname
+        if not host:
+            raise SecurityError("Invalid URL: No hostname found.")
+        addresses = resolve_all_addresses(host)
+        if not addresses:
+            raise SecurityError(f"Could not resolve hostname: {host}")
+        for ip_addr in addresses:
+            if is_internal_ip(ip_addr):
+                raise SecurityError(f"URL points to an internal/private IP address: {ip_addr}")
+
+        ip = addresses[0]
+        ip_host = f"[{ip}]" if ":" in ip else ip
+        netloc = f"{ip_host}:{parsed.port}" if parsed.port else ip_host
+        request.headers["Host"] = f"{host}:{parsed.port}" if parsed.port else host
+        request.url = urlunparse(parsed._replace(netloc=netloc))
+        request.anydoc_hostname = host
+        return super().send(request, **kwargs)
+
+    def build_connection_pool_key_attributes(self, request, verify, cert=None):
+        host_params, pool_kwargs = super().build_connection_pool_key_attributes(request, verify, cert)
+        hostname = getattr(request, "anydoc_hostname", None)
+        if hostname and host_params.get("scheme") == "https":
+            pool_kwargs["server_hostname"] = hostname   # SNI
+            pool_kwargs["assert_hostname"] = hostname   # certificate must match the real host
+        return host_params, pool_kwargs
+
+
+def safe_session() -> requests.Session:
+    """A requests session whose every connection goes through PinnedIPAdapter.
+    trust_env=False: an environment proxy would do its own DNS lookup and
+    reintroduce the gap the adapter closes."""
+    session = requests.Session()
+    session.trust_env = False
+    adapter = PinnedIPAdapter(max_retries=0)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    session.headers["User-Agent"] = "AnyDocBot/1.0 (+https://github.com/Tarunvarma07/AnyDoc_chat)"
+    return session
+
+
+def resolve_safe_url(url: str, max_redirects: int = 5, session: requests.Session = None) -> str:
     """
     Follows redirects manually, validating each hop to prevent SSRF bypass via redirects.
     Returns the final resolved URL if all hops are safe.
     """
-    import requests
     from urllib.parse import urljoin
-    
+
     current_url = url
-    session = requests.Session()
-    
+    session = session or safe_session()
+
     for _ in range(max_redirects):
         # Validate the current hop
         validate_url(current_url)

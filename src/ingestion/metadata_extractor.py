@@ -6,6 +6,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
+from src.llm import groq_model
 from src.generation.guardrails import check_prompt_injection
 
 logger = logging.getLogger(__name__)
@@ -22,12 +23,12 @@ class MetadataExtractor:
     # When prompt injection defenses are built in Phase 4, they MUST be applied 
     # to this extraction call, not just the final QA generation step.
     
-    def __init__(self, model_name: str = "llama-3.1-8b-instant"):
+    def __init__(self, model_name: str = None):
         if "GROQ_API_KEY" not in os.environ:
             logger.warning("GROQ_API_KEY not found in environment. Metadata extraction will fail.")
         
         # Use a fast/cheap model for metadata extraction
-        self.llm = ChatGroq(model_name=model_name, temperature=0)
+        self.llm = ChatGroq(model_name=groq_model(model_name), temperature=0)
         
         self.parser = JsonOutputParser()
         

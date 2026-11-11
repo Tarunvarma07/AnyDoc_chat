@@ -67,10 +67,15 @@ class EmbedStore:
             logger.info(f"Embedding model consistency check passed: {self.model_name}")
 
     def register_callback(self, callback):
-        """Registers a function to be called whenever new documents are added."""
+        """Registers a function to be called whenever the stored documents change
+        (added, replaced or deleted)."""
         self.on_document_added_callbacks.append(callback)
 
-    def add_documents(self, documents: List[Document]):
+    def _notify(self):
+        for cb in self.on_document_added_callbacks:
+            cb()
+
+    def add_documents(self, documents: List[Document], notify: bool = True):
         """Embeds and stores documents in ChromaDB."""
         if not documents:
             return
@@ -82,10 +87,58 @@ class EmbedStore:
         ids = [self._chunk_id(doc) for doc in documents]
         self.vector_store.add_documents(documents, ids=ids)
         logger.info(f"Added {len(documents)} documents to vector store.")
-        
-        # Notify listeners that the index has changed
-        for cb in self.on_document_added_callbacks:
-            cb()
+
+        if notify:
+            self._notify()
+
+    def delete_source(self, source: str, notify: bool = True) -> int:
+        """Deletes every chunk whose metadata `source` equals `source`.
+        Returns the number of chunks removed."""
+        collection = self.vector_store._collection
+        ids = collection.get(where={"source": source}, include=[])["ids"]
+        if ids:
+            collection.delete(ids=ids)
+            logger.info(f"Deleted {len(ids)} chunks for source {source!r}.")
+            if notify:
+                self._notify()
+        return len(ids)
+
+    def replace_documents(self, documents: List[Document]) -> int:
+        """
+        Stores `documents` after removing any chunks previously stored for the
+        same sources. Upserting by deterministic ID only covers an *identical*
+        re-upload; an edited file produces different chunks, and without this
+        its old version would stay searchable next to the new one.
+        Returns the number of old chunks removed. The index-changed callbacks
+        run once, after both steps.
+        """
+        if not documents:
+            return 0
+        removed = sum(self.delete_source(s, notify=False)
+                      for s in sorted({d.metadata.get("source", "") for d in documents}))
+        self.add_documents(documents, notify=False)
+        self._notify()
+        return removed
+
+    def list_sources(self) -> List[dict]:
+        """One summary row per ingested source (file name or page URL)."""
+        metadatas = self.vector_store._collection.get(include=["metadatas"])["metadatas"]
+        rows = {}
+        for m in metadatas:
+            m = m or {}
+            src = m.get("source", "Unknown")
+            row = rows.setdefault(src, {"source": src, "chunks": 0, "pages": set(),
+                                        "title": m.get("extracted_title"),
+                                        "document_type": m.get("document_type"),
+                                        "ingested_at": m.get("ingested_at")})
+            row["chunks"] += 1
+            if isinstance(m.get("page"), int):
+                row["pages"].add(m["page"])
+        result = []
+        for row in rows.values():
+            row["pages"] = len(row["pages"]) or None
+            result.append(row)
+        return sorted(result, key=lambda r: r["source"].lower())
 
     @staticmethod
     def _chunk_id(doc: Document) -> str:

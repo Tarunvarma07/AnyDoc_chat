@@ -1,3 +1,12 @@
+envVarGroups:
+  # Shared by both services: Render generates a random 256-bit value once.
+  # The API requires it in the X-API-Key header (src/api/security.py); the UI
+  # sends it from the server side, so visitors never see it.
+  - name: anydoc-shared
+    envVars:
+      - key: ANYDOC_API_KEY
+        generateValue: true
+
 services:
   - type: web
     name: anydoc-api
@@ -6,12 +15,17 @@ services:
     dockerContext: .
     plan: free
     region: oregon
-    healthCheckPath: /stats
+    healthCheckPath: /health
     dockerCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - fromGroup: anydoc-shared
       - key: GROQ_API_KEY
         sync: false
       - key: PYTHONUNBUFFERED
+        value: "1"
+      # Render's proxy sets X-Forwarded-For; rate limits use it for clients
+      # that call the API directly (the UI forwards each visitor's IP itself).
+      - key: TRUST_PROXY
         value: "1"
 
   - type: web
@@ -23,6 +37,7 @@ services:
     region: oregon
     dockerCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false --server.enableWebsocketCompression false
     envVars:
+      - fromGroup: anydoc-shared
       # Update this if Render assigns anydoc-api a different subdomain
       # (e.g. because "anydoc-api" was already taken) - see DEPLOY.md.
       - key: API_URL

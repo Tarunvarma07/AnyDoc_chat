@@ -67,3 +67,16 @@ def test_hybrid_retriever_widens_candidate_pool_when_reranker_attached(tmp_path)
     retriever = HybridRetriever(embed_store=store, top_n=5, reranker=mock_reranker)
 
     assert retriever.candidate_n == 15  # top_n * 3
+
+
+def test_reranker_does_not_mutate_input_documents():
+    # The inputs can be the retriever's shared BM25 snapshot; writing scores
+    # onto them let concurrent queries overwrite each other's rerank_score.
+    docs = [Document(page_content="a", metadata={"source": "x"}), Document(page_content="b", metadata={"source": "y"})]
+    mock_model = MagicMock()
+    mock_model.rerank.return_value = [0.2, 0.7]
+    reranker = Reranker()
+    with patch.object(reranker, "_get_model", return_value=mock_model):
+        results = reranker.rerank("q", docs, top_n=2)
+    assert [r.metadata["rerank_score"] for r in results] == [0.7, 0.2]
+    assert all("rerank_score" not in d.metadata for d in docs)

@@ -1,0 +1,63 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1201 >>
+stream
+BT /F1 11 Tf 50 760 Td 15 TL (Acme Robotics Support Plans.) ' (All plans include software updates and access to the customer portal.) ' (Prices are billed monthly and exclude taxes.) ' ET
+BT /F1 10 Tf 55 634 Td (Plan) Tj ET
+BT /F1 10 Tf 165 634 Td (Monthly price) Tj ET
+BT /F1 10 Tf 265 634 Td (Response time) Tj ET
+BT /F1 10 Tf 365 634 Td (Seats) Tj ET
+BT /F1 10 Tf 435 634 Td (Phone support) Tj ET
+BT /F1 10 Tf 55 610 Td (Starter) Tj ET
+BT /F1 10 Tf 165 610 Td (49 USD) Tj ET
+BT /F1 10 Tf 265 610 Td (48 hours) Tj ET
+BT /F1 10 Tf 365 610 Td (5) Tj ET
+BT /F1 10 Tf 435 610 Td (No) Tj ET
+BT /F1 10 Tf 55 586 Td (Pro) Tj ET
+BT /F1 10 Tf 165 586 Td (199 USD) Tj ET
+BT /F1 10 Tf 265 586 Td (8 hours) Tj ET
+BT /F1 10 Tf 365 586 Td (25) Tj ET
+BT /F1 10 Tf 435 586 Td (Yes) Tj ET
+BT /F1 10 Tf 55 562 Td (Enterprise) Tj ET
+BT /F1 10 Tf 165 562 Td (899 USD) Tj ET
+BT /F1 10 Tf 265 562 Td (1 hour) Tj ET
+BT /F1 10 Tf 365 562 Td (250) Tj ET
+BT /F1 10 Tf 435 562 Td (Yes) Tj ET
+50 650 m 530 650 l S
+50 626 m 530 626 l S
+50 602 m 530 602 l S
+50 578 m 530 578 l S
+50 554 m 530 554 l S
+50 650 m 50 554 l S
+160 650 m 160 554 l S
+260 650 m 260 554 l S
+360 650 m 360 554 l S
+430 650 m 430 554 l S
+530 650 m 530 554 l S
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001494 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1564
+%%EOF

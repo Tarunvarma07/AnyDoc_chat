@@ -77,6 +77,17 @@ def check_profanity(text: str) -> bool:
 
     return False
 
+# Bracket styles some models use for citations: 【1】 (gpt-oss does), ［1］, 〔1〕.
+_ALT_CITATION = re.compile(r"[【［〔]\s*(\d+)\s*[】］〕]")
+
+
+def normalize_citations(answer: str) -> str:
+    """Rewrites alternative citation brackets as [n]. Without this, an answer citing
+    【7】 would skip verify_citations entirely (it only recognises [7]), and the
+    UI and evaluation would count it as uncited."""
+    return _ALT_CITATION.sub(r"[\1]", answer)
+
+
 def verify_citations(answer: str, context_docs: List[Document]) -> bool:
     """
     Verifies that any citations in the answer (e.g., [1], [2]) map to actual provided documents.

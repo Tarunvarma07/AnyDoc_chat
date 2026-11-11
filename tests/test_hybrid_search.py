@@ -106,3 +106,52 @@ def test_reingesting_same_chunks_is_idempotent(tmp_path):
     store.add_documents(chunks)  # same file ingested a second time
     # Identical text at two positions is kept twice; the second ingest adds nothing.
     assert len(store.get_all_documents()) == 2
+
+
+def test_retrieve_returns_per_call_stats_even_when_empty(tmp_path):
+    # last_run_stats used to keep the previous query's numbers when the index
+    # was empty, and is shared between concurrent requests; retrieve() returns
+    # the stats of this call alongside its documents.
+    store = EmbedStore(persist_directory=str(tmp_path / "db_stats"), collection_name="test_stats")
+    retriever = HybridRetriever(embed_store=store, top_n=2)
+    retriever.last_run_stats = {"candidates_considered": 99}
+    docs, stats = retriever.retrieve("anything")
+    assert docs == [] and stats["candidates_considered"] == 0 and stats["reranked"] is False
+
+    store.add_documents([Document(page_content="Lidar sensors are stocked in Austin.", metadata={"source": "a.txt", "chunk_index": 0})])
+    docs, stats = retriever.retrieve("lidar sensors")
+    assert len(docs) == 1 and stats["candidates_considered"] == 1
+
+
+def test_replace_documents_removes_the_previous_version(tmp_path):
+    store = EmbedStore(persist_directory=str(tmp_path / "db_replace"), collection_name="test_replace")
+    retriever = HybridRetriever(embed_store=store, top_n=5)
+    v1 = [Document(page_content=f"Old policy line {i}.", metadata={"source": "policy.txt", "chunk_index": i}) for i in range(3)]
+    other = [Document(page_content="Unrelated note.", metadata={"source": "other.txt", "chunk_index": 0})]
+    store.add_documents(v1 + other)
+
+    v2 = [Document(page_content="New policy: remote work three days.", metadata={"source": "policy.txt", "chunk_index": 0})]
+    removed = store.replace_documents(v2)
+
+    texts = sorted(d.page_content for d in store.get_all_documents())
+    assert removed == 3
+    assert texts == ["New policy: remote work three days.", "Unrelated note."]
+    assert len(retriever.docs) == 2  # BM25 rebuilt after the replace
+
+
+def test_list_and_delete_sources(tmp_path):
+    store = EmbedStore(persist_directory=str(tmp_path / "db_list"), collection_name="test_list")
+    retriever = HybridRetriever(embed_store=store, top_n=5)
+    store.add_documents([
+        Document(page_content="Page one.", metadata={"source": "hb.pdf", "page": 0, "chunk_index": 0}),
+        Document(page_content="Page two.", metadata={"source": "hb.pdf", "page": 1, "chunk_index": 1}),
+        Document(page_content="A row.", metadata={"source": "inv.csv", "chunk_index": 2}),
+    ])
+    rows = {r["source"]: r for r in store.list_sources()}
+    assert rows["hb.pdf"]["chunks"] == 2 and rows["hb.pdf"]["pages"] == 2
+    assert rows["inv.csv"]["chunks"] == 1 and rows["inv.csv"]["pages"] is None
+
+    assert store.delete_source("hb.pdf") == 2
+    assert store.delete_source("hb.pdf") == 0
+    assert [r["source"] for r in store.list_sources()] == ["inv.csv"]
+    assert len(retriever.docs) == 1  # BM25 rebuilt after the delete

@@ -2,6 +2,7 @@ import os
 import logging
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
+from src.llm import groq_model
 from src.generation.guardrails import check_prompt_injection
 
 logger = logging.getLogger(__name__)
@@ -17,11 +18,11 @@ class QueryRewriter:
     answer generation and citation - only retrieval sees the rewritten query.
     """
 
-    def __init__(self, model_name: str = "llama-3.1-8b-instant"):
+    def __init__(self, model_name: str = None):
         if "GROQ_API_KEY" not in os.environ:
             logger.warning("GROQ_API_KEY not found in environment. Query rewriting will fail.")
 
-        self.llm = ChatGroq(model_name=model_name, temperature=0)
+        self.llm = ChatGroq(model_name=groq_model(model_name), temperature=0)
 
         self.prompt = PromptTemplate(
             template="""You rewrite user questions into a single, retrieval-optimized search query.

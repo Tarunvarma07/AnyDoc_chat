@@ -49,9 +49,8 @@ class Reranker:
         scored_docs = list(zip(documents, scores))
         scored_docs.sort(key=lambda pair: pair[1], reverse=True)
 
-        top_docs = []
-        for doc, score in scored_docs[:top_n]:
-            doc.metadata["rerank_score"] = float(score)
-            top_docs.append(doc)
-
-        return top_docs
+        # New Document objects: the inputs can be the retriever's shared BM25
+        # snapshot, and writing the score onto those would let two concurrent
+        # queries overwrite each other's scores.
+        return [Document(page_content=doc.page_content, metadata={**doc.metadata, "rerank_score": float(score)})
+                for doc, score in scored_docs[:top_n]]

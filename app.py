@@ -3,13 +3,36 @@ import streamlit as st
 import pandas as pd
 import requests
 import os
+from dotenv import load_dotenv
 from langchain_core.documents import Document
 from src.pipeline.chunk import compare_strategies
 
 # Configure page aesthetics
 st.set_page_config(page_title="AnyDoc Dashboard", page_icon="🗂️", layout="wide")
 
+# Same .env as the API, so a local ANYDOC_API_KEY reaches both processes
+# (environment variables that are already set, e.g. on Render, take precedence).
+load_dotenv()
+
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
+# Shared secret for the API (see src/api/security.py). It stays on this server:
+# browsers talk to Streamlit, and only Streamlit talks to the API.
+ANYDOC_API_KEY = os.environ.get("ANYDOC_API_KEY", "").strip()
+
+
+def api_headers(per_user: bool = True) -> dict:
+    """Headers for API calls: the API key, plus this visitor's IP so the API can
+    rate-limit each visitor separately instead of the UI server as a whole."""
+    headers = {"X-API-Key": ANYDOC_API_KEY} if ANYDOC_API_KEY else {}
+    if per_user:
+        try:
+            forwarded = st.context.headers.get("X-Forwarded-For", "")
+            client = forwarded.split(",")[0].strip() if forwarded else (st.context.ip_address or "")
+        except Exception:
+            client = ""
+        if client:
+            headers["X-AnyDoc-Client"] = client
+    return headers
 
 # SVG Icons (Lucide)
 ICON_CHECK = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
@@ -282,7 +305,7 @@ def fetch_stats():
     # Cached for 10s so this page's 3 call sites collapse into one network
     # round trip per rerun instead of independently racing the same wake-up.
     try:
-        res = requests.get(f"{API_URL}/stats", timeout=45)
+        res = requests.get(f"{API_URL}/stats", headers=api_headers(per_user=False), timeout=45)
         if res.status_code == 200:
             return res.json(), True
     except requests.exceptions.RequestException:
@@ -299,8 +322,11 @@ def error_detail(res):
     whole app if called blindly, so this always degrades to something safe.
     """
     try:
-        return res.json().get("detail", f"Request failed ({res.status_code}).")
-    except (ValueError, requests.exceptions.JSONDecodeError):
+        detail = res.json().get("detail", f"Request failed ({res.status_code}).")
+        if isinstance(detail, list):  # FastAPI validation errors: [{"loc": [...], "msg": "..."}]
+            return "; ".join(str(d.get("msg", d)) for d in detail if isinstance(d, dict)) or str(detail)
+        return detail
+    except (ValueError, AttributeError, requests.exceptions.JSONDecodeError):
         snippet = res.text[:200].strip() if res.text else "(empty response)"
         return f"Request failed ({res.status_code}): {snippet}"
 
@@ -413,8 +439,9 @@ with tab_ingest:
             else:
                 with st.spinner("Processing link..."):
                     try:
-                        res = requests.post(f"{API_URL}/ingest/url", json={"url": url_input}, timeout=120)
+                        res = requests.post(f"{API_URL}/ingest/url", json={"url": url_input}, headers=api_headers(), timeout=120)
                         if res.status_code == 200:
+                            fetch_stats.clear()
                             render_status(True, res.json()["message"])
                         else:
                             render_status(False, error_detail(res))
@@ -431,8 +458,9 @@ with tab_ingest:
                 with st.spinner("Processing file..."):
                     try:
                         files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                        res = requests.post(f"{API_URL}/ingest/file", files=files, timeout=170)
+                        res = requests.post(f"{API_URL}/ingest/file", files=files, headers=api_headers(), timeout=170)
                         if res.status_code == 200:
+                            fetch_stats.clear()
                             render_status(True, res.json()["message"])
                         else:
                             render_status(False, error_detail(res))
@@ -443,6 +471,39 @@ with tab_ingest:
     stats, backend_up = fetch_stats()
     if backend_up and stats:
         st.markdown(f'<span class="pill">{ICON_PULSE} {stats["document_count"]} chunks currently indexed</span>', unsafe_allow_html=True)
+
+        st.markdown("#### Indexed documents")
+        # A delete triggers a rerun; its result is shown once on the next run.
+        flash = st.session_state.pop("doc_flash", None)
+        if flash:
+            render_status(*flash)
+        try:
+            res = requests.get(f"{API_URL}/documents", headers=api_headers(), timeout=45)
+            documents = res.json().get("documents", []) if res.status_code == 200 else []
+            if res.status_code != 200:
+                render_status(False, error_detail(res))
+        except requests.exceptions.RequestException as e:
+            documents = []
+            render_status(False, f"Could not load the document list: {e}")
+        if not documents:
+            st.caption("Nothing indexed yet. Upload a file or add a link above.")
+        for i, doc in enumerate(documents):
+            c_name, c_info, c_btn = st.columns([5, 3, 1])
+            name = doc["source"].split("/")[-1].split("\\")[-1] or doc["source"]
+            c_name.markdown(f"**{html.escape(name)}**  \n<span class='timing-metric'>{html.escape(doc['source'])}</span>", unsafe_allow_html=True)
+            pages = f" · {doc['pages']} pages" if doc.get("pages") else ""
+            when = f" · {doc['ingested_at'][:16].replace('T', ' ')} UTC" if doc.get("ingested_at") else ""
+            c_info.markdown(f"<span class='timing-metric'>{doc['chunks']} chunks{pages}{when}</span>", unsafe_allow_html=True)
+            if c_btn.button("Delete", key=f"del_{i}_{doc['source']}"):
+                try:
+                    r = requests.delete(f"{API_URL}/documents", params={"source": doc["source"]}, headers=api_headers(), timeout=45)
+                    ok = r.status_code == 200
+                    msg = f"Deleted {name} ({r.json()['deleted_chunks']} chunks)." if ok else error_detail(r)
+                except requests.exceptions.RequestException as e:
+                    ok, msg = False, f"Backend API is offline or timed out: {e}"
+                st.session_state["doc_flash"] = (ok, msg)
+                fetch_stats.clear()
+                st.rerun()
 
 # --- TAB: CHAT ---
 with tab_chat:
@@ -508,7 +569,7 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("Rewriting query, retrieving, reranking, generating..."):
                 try:
-                    res = requests.post(f"{API_URL}/query", json={"query": query}, timeout=170)
+                    res = requests.post(f"{API_URL}/query", json={"query": query}, headers=api_headers(), timeout=170)
                     if res.status_code == 200:
                         data = res.json()
                         content = data["answer"]
@@ -668,7 +729,7 @@ with tab_eval:
         if st.button("Run Evaluation Benchmark", key="btn_eval"):
             with st.spinner("Running evaluation on the backend..."):
                 try:
-                    res = requests.post(f"{API_URL}/evaluate", timeout=170)
+                    res = requests.post(f"{API_URL}/evaluate", headers=api_headers(), timeout=170)
                     eval_data = res.json() if res.status_code == 200 else None
                     if eval_data:
                         render_eval_results(eval_data, "Freshly computed just now against the live backend.")

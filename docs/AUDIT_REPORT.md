@@ -142,7 +142,7 @@ Ready to demo from the local venv; runbook in [`DEMO.md`](DEMO.md).
 
 Blockers to clear before the interview (owner action):
 1. Run the live smoke test (DEMO.md §3) to confirm the Groq key, quota, and that
-   `llama-3.1-8b-instant` is still served.
+   `llama-3.1-8b-instant` is still served. (Update, Nov 2026: Groq retired it; the default is now `openai/gpt-oss-20b`, configurable with `GROQ_MODEL`.)
 2. Start the backend once on the day so model weights are cached (needs internet).
 3. Decide whether to commit these changes (nothing has been committed or pushed).
 

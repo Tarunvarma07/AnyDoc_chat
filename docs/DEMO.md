@@ -19,7 +19,7 @@ cd "C:\Users\tarun\OneDrive\Desktop\projects\RAG 2"
 - **Verify the live LLM yourself** (this audit made no live Groq calls): run section 2,
   then the smoke test in section 3. If answers come back as
   "An error occurred while generating the answer.", the key, quota, or the model
-  `llama-3.1-8b-instant` is the problem — check the uvicorn terminal for the Groq error.
+  the configured model (`GROQ_MODEL`, default `openai/gpt-oss-20b`) is the problem — check the uvicorn terminal for the Groq error.
 
 Offline test suite (uses a dummy key, never calls Groq), in its own terminal:
 

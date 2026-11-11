@@ -98,12 +98,21 @@ class HybridRetriever:
         return fused_docs
 
     def get_relevant_documents(self, query: str) -> List[Document]:
-        """Runs the hybrid search, optionally reranks, and returns the top results."""
+        """Runs the hybrid search, optionally reranks, and returns the top results.
+        Also records the run's stats in `last_run_stats` (kept for existing callers;
+        concurrent callers should use `retrieve`, which returns them directly)."""
+        docs, stats = self.retrieve(query)
+        self.last_run_stats = stats
+        return docs
+
+    def retrieve(self, query: str) -> Tuple[List[Document], Dict]:
+        """Runs the hybrid search and returns (documents, stats) for this call only."""
         start_time = time.time()
         docs, bm25 = self._snapshot
         if not docs or not bm25:
             logger.warning("HybridRetriever has no documents. Returning empty list.")
-            return []
+            return [], {"candidates_considered": 0, "reranked": False,
+                        "elapsed_ms": round((time.time() - start_time) * 1000, 2)}
 
         fetch_n = self.candidate_n
 
@@ -133,13 +142,10 @@ class HybridRetriever:
             fused_results = fused_results[:self.top_n]
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
-        # Exposed for callers (e.g. the API layer) that want to surface pipeline
-        # internals - e.g. an inspectable retrieval trace in the UI - without
-        # changing this method's return type.
-        self.last_run_stats = {
+        stats = {
             "candidates_considered": candidates_considered,
             "reranked": self.reranker is not None,
             "elapsed_ms": elapsed_ms,
         }
         logger.debug(f"Hybrid retrieval completed in {elapsed_ms}ms (reranked={self.reranker is not None})")
-        return fused_results
+        return fused_results, stats

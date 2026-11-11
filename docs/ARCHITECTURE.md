@@ -27,7 +27,7 @@ flowchart LR
     API --> ING[Ingestion<br/>file_reader / link_reader<br/>guardrails]
     API --> RET[Retrieval<br/>HybridRetriever + Reranker]
     API --> GEN[Generation<br/>QAGenerator + guardrails]
-    ING --> META[MetadataExtractor] --> GROQ[(Groq API<br/>llama-3.1-8b-instant)]
+    ING --> META[MetadataExtractor] --> GROQ[(Groq API<br/>openai/gpt-oss-20b)]
     RET --> RW[QueryRewriter] --> GROQ
     GEN --> GROQ
     ING --> CH[Chunker] --> ES[EmbedStore]
@@ -110,7 +110,7 @@ flowchart TD
     CE --> G{Input guardrails on ORIGINAL query:<br/>injection regex, profanity}
     G -- hit --> RF[Fixed refusal string]
     G --> P[Prompt: numbered 'Document [i] (Source: name)' blocks + original question]
-    P --> L[Groq llama-3.1-8b-instant, temperature 0]
+    P --> L[Groq openai/gpt-oss-20b, temperature 0]
     L -- exception --> ERR['An error occurred while generating the answer.' with HTTP 200]
     L --> O{Output guardrails: profanity, citation indices within 1..5}
     O -- fail --> RF2[Fixed refusal string]
@@ -141,7 +141,7 @@ Notes that are easy to get wrong in an interview:
 | Candidates | `candidate_n = top_n × 3 = 15` per retriever when a reranker is attached | `HybridRetriever.__init__` |
 | Reranker | `Xenova/ms-marco-MiniLM-L-6-v2` (ONNX cross-encoder), raw logits, lazy-loaded | `src/retrieval/reranker.py` |
 | Final context | top 5 chunks (~2,500 characters) | `top_n=5` |
-| LLM | Groq `llama-3.1-8b-instant`, temperature 0, used for rewrite, metadata, answer | three classes |
+| LLM | Groq `openai/gpt-oss-20b` by default (set `GROQ_MODEL` to change; Groq retired the original `llama-3.1-8b-instant`), temperature 0, used for rewrite, metadata, answer | `src/llm.py` |
 
 ## 6. Module responsibilities
 
